@@ -16,8 +16,9 @@
     "db:rollback": "tsx scripts/migrate.ts down",
     "db:migrate:prod": "node dist/scripts/migrate.js up",
     "db:seed": "tsx scripts/seed.ts",
-    "test": "tsx --test --test-concurrency=1 tests/*.test.ts",
-    "check": "npm run typecheck && npm test && npm run build"
+    "test": "npm run test:compile && node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand",
+    "check": "npm run typecheck && npm test && npm run build",
+    "test:compile": "node -e \"require('node:fs').rmSync('.test-dist', { recursive: true, force: true })\" && tsc -p tsconfig.test.json"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
@@ -33,12 +34,14 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@jest/globals": "^30.5.2",
     "@types/bcrypt": "^6.0.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.19.0",
     "@types/supertest": "^6.0.3",
+    "jest": "^30.5.2",
     "supertest": "^7.1.4",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
@@ -46,6 +49,9 @@
   "overrides": {
     "sequelize": {
       "uuid": "^11.1.1"
+    },
+    "@istanbuljs/load-nyc-config": {
+      "js-yaml": "^4.1.1"
     }
   }
 }

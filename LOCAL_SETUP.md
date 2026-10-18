@@ -33,7 +33,7 @@ If the app is already running on port 3001, restart that instance to load code c
 npm run check
 ```
 
-This checks TypeScript, runs the middleware, integration, and input-validation tests (using the separate test database for integration tests), and builds the production application. The full API contract is in `docs/openapi.json`; setup and architecture details are in `README.md`.
+This checks TypeScript, runs the Jest middleware, HTTP logging, integration, and input-validation suites (using the separate test database for integration tests), and builds the production application. Use `npm test` to run Jest alone. The test script compiles sources into `.test-dist` before running Jest with native ES module support. The full API contract is in `docs/openapi.json`; setup and architecture details are in `README.md`.
 
 The existing database named `stageconnect` was not modified. These two dedicated databases and the demo accounts are retained so this local app can be used and tested again.
 

@@ -1,5 +1,4 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from '@jest/globals';
 import express from 'express';
 import request from 'supertest';
 import { pino } from 'pino';
@@ -23,10 +22,10 @@ test('authentication failures stop controller execution and preserve infrastruct
     });
     app.use(errorHandler(pino({ level: 'silent' })));
     const response = await request(app).get('/protected').set('Authorization', 'Bearer example');
-    assert.equal(controllerCalls, 0);
-    assert.equal(response.status, status);
-    assert.deepEqual(response.body, { success: false, data: {}, error: message });
-    if (status === 401) assert.equal(response.headers['www-authenticate'], 'Bearer');
-    if (status === 503) assert.equal(response.headers['retry-after'], '1');
+    expect(controllerCalls).toBe(0);
+    expect(response.status).toBe(status);
+    expect(response.body).toStrictEqual({ success: false, data: {}, error: message });
+    if (status === 401) expect(response.headers['www-authenticate']).toBe('Bearer');
+    if (status === 503) expect(response.headers['retry-after']).toBe('1');
   }
 });

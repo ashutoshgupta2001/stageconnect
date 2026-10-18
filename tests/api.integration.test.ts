@@ -1,6 +1,5 @@
 import 'dotenv/config';
-import { after, before, test } from 'node:test';
-import assert from 'node:assert/strict';
+import { afterAll, beforeAll, expect, test } from '@jest/globals';
 import { randomBytes, randomUUID } from 'node:crypto';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
@@ -13,7 +12,6 @@ import { createContainer, type Container } from '../app/container.js';
 import { migrate } from '../app/db/migrator.js';
 import type { UserModel } from '../app/models/index.js';
 import type { BookingStatus, Role } from '../app/domain/types.js';
-import { databaseCode } from '../app/shared/errors.js';
 
 const url = process.env.TEST_DATABASE_URL;
 if (!url || !new URL(url).pathname.endsWith('_test')) {
@@ -29,13 +27,13 @@ let container: Container;
 let app: ReturnType<typeof createApp>;
 const ownedUsers: string[] = [];
 const ownedBookings: string[] = [];
-before(async () => {
+beforeAll(async () => {
   hash = await bcrypt.hash(password, 10);
   container = await createContainer(config);
   await migrate(container.db);
   app = createApp(config, container, { limits: { globalMax: 2000, loginMax: 500 } });
 });
-after(async () => {
+afterAll(async () => {
   if (!container) return;
   try {
     // Only remove records this test process created; never truncate shared tables.
@@ -77,12 +75,12 @@ function patch(id: string, token: string, status: string, targetApp = app) {
   return request(targetApp).patch('/api/v1/bookings/' + id + '/status').auth(token, { type: 'bearer' }).send({ status });
 }
 function errorShape(response: request.Response, status: number) {
-  assert.equal(response.status, status);
-  assert.equal(response.body.success, false);
-  assert.deepEqual(response.body.data, {});
-  assert.equal(typeof response.body.error, 'string');
-  assert.ok(response.body.error.length);
-  assert.deepEqual(Object.keys(response.body).sort(), ['data', 'error', 'success']);
+  expect(response.status).toBe(status);
+  expect(response.body.success).toBe(false);
+  expect(response.body.data).toStrictEqual({});
+  expect(typeof response.body.error).toBe('string');
+  expect(response.body.error.length).toBeTruthy();
+  expect(Object.keys(response.body).sort()).toStrictEqual(['data', 'error', 'success']);
 }
 function bookingBody(artist: UserModel, times = futureWindow()) {
   return { artist_id: artist.getDataValue('id'), event_start: times.event_start.toISOString(), event_end: times.event_end.toISOString(), notes: 'A private acoustic event.' };
@@ -94,13 +92,13 @@ test('login issues a verifiable JWT with user ID, role, iat and expiration', asy
     email: '  ' + account.getDataValue('email_normalized').toUpperCase() + '  ', password
   }).expect(200);
   const claims = jwt.verify(response.body.data.access_token, config.JWT_SECRET, { algorithms: ['HS256'], issuer: config.JWT_ISSUER, audience: config.JWT_AUDIENCE }) as jwt.JwtPayload;
-  assert.equal(claims.sub, account.getDataValue('id'));
-  assert.equal(claims.role, 'client');
-  assert.equal(typeof claims.iat, 'number');
-  assert.equal(claims.exp! - claims.iat!, 900);
-  assert.equal(response.body.error, '');
-  assert.equal(response.headers['cache-control'], 'no-store');
-  assert.ok(!JSON.stringify(response.body).includes(hash));
+  expect(claims.sub).toBe(account.getDataValue('id'));
+  expect(claims.role).toBe('client');
+  expect(typeof claims.iat).toBe('number');
+  expect(claims.exp! - claims.iat!).toBe(900);
+  expect(response.body.error).toBe('');
+  expect(response.headers['cache-control']).toBe('no-store');
+  expect(!JSON.stringify(response.body).includes(hash)).toBeTruthy();
 });
 
 test('API routes require the v1 prefix; health is unversioned and unsupported methods retain 405', async () => {
@@ -115,17 +113,17 @@ test('API routes require the v1 prefix; health is unversioned and unsupported me
     for (const attempt of attempts) {
       const response = await attempt;
       errorShape(response, 404);
-      assert.equal(response.body.error, 'Route not found.');
-      assert.ok(response.headers['x-request-id']);
+      expect(response.body.error).toBe('Route not found.');
+      expect(response.headers['x-request-id']).toBeTruthy();
     }
   }
   const health = await request(app).get('/health').expect(200);
-  assert.deepEqual(health.body, { success: true, data: { status: 'ok' }, error: '' });
+  expect(health.body).toStrictEqual({ success: true, data: { status: 'ok' }, error: '' });
   errorShape(await request(app).get('/api/v1/health'), 404);
   errorShape(await request(app).get('/api/v1/missing'), 404);
   const method = await request(app).put('/api/v1/bookings').send({});
   errorShape(method, 405);
-  assert.equal(method.headers.allow, 'POST');
+  expect(method.headers.allow).toBe('POST');
 });
 
 test('unknown email, wrong password and disabled account have identical credential failures', async () => {
@@ -138,13 +136,13 @@ test('unknown email, wrong password and disabled account have identical credenti
   for (const attempt of attempts) {
     const response = await request(app).post('/api/v1/auth/login').send(attempt);
     errorShape(response, 401);
-    if (body) assert.deepEqual(response.body, body);
+    if (body) expect(response.body).toStrictEqual(body);
     body = response.body;
   }
   await account.update({ is_active: false });
   const disabled = await request(app).post('/api/v1/auth/login').send({ email: account.getDataValue('email_normalized'), password });
   errorShape(disabled, 401);
-  assert.deepEqual(disabled.body, body);
+  expect(disabled.body).toStrictEqual(body);
 });
 
 test('login validates types and byte limits without modifying passwords', async () => {
@@ -179,7 +177,7 @@ test('every protected endpoint authenticates before controller validation and re
   const headers = [undefined, 'Basic credentials', 'Bearer', 'Bearer one two', 'Bearer one,two', ...tokens.map(token => 'Bearer ' + token)];
   const expectUnauthenticated = (response: request.Response) => {
     errorShape(response, 401);
-    assert.equal(response.headers['www-authenticate'], 'Bearer');
+    expect(response.headers['www-authenticate']).toBe('Bearer');
   };
   for (const endpoint of endpoints) {
     for (const header of headers) {
@@ -211,12 +209,12 @@ test('concurrent requests keep each client identity isolated and do not authenti
   ]);
   for (const response of [first, second]) {
     if (response.body.data?.booking?.id) ownedBookings.push(response.body.data.booking.id);
-    assert.equal(response.status, 201);
+    expect(response.status).toBe(201);
   }
-  assert.equal(first.body.data.booking.client_id, client.getDataValue('id'));
-  assert.equal(second.body.data.booking.client_id, otherClient.getDataValue('id'));
+  expect(first.body.data.booking.client_id).toBe(client.getDataValue('id'));
+  expect(second.body.data.booking.client_id).toBe(otherClient.getDataValue('id'));
   errorShape(unauthenticated, 401);
-  assert.equal(await container.models.Booking.count({ where: { artist_id: artist.getDataValue('id') } }), 2);
+  expect(await container.models.Booking.count({ where: { artist_id: artist.getDataValue('id') } })).toBe(2);
 });
 
 test('client creates a pending booking, derives its owner, and accepts explicit timezone offsets', async () => {
@@ -226,11 +224,11 @@ test('client creates a pending booking, derives its owner, and accepts explicit 
   const response = await request(app).post('/api/v1/bookings').auth(clientToken, { type: 'bearer' }).send(body).expect(201);
   const created = response.body.data.booking;
   ownedBookings.push(created.id);
-  assert.equal(created.status, 'pending');
-  assert.equal(created.client_id, client.getDataValue('id'));
-  assert.equal(created.artist_id, artist.getDataValue('id'));
-  assert.equal(created.event_start, new Date(body.event_start).toISOString());
-  assert.ok(!('client_role' in created));
+  expect(created.status).toBe('pending');
+  expect(created.client_id).toBe(client.getDataValue('id'));
+  expect(created.artist_id).toBe(artist.getDataValue('id'));
+  expect(created.event_start).toBe(new Date(body.event_start).toISOString());
+  expect(!('client_role' in created)).toBeTruthy();
 });
 
 test('booking creation rejects unauthorized callers, spoofed fields, invalid artists and malformed dates', async () => {
@@ -268,7 +266,7 @@ test('overlap checks cover containment; adjacent events and overlapping pending 
   const send = async (start: Date, end: Date, expected: number) => {
     const response = await request(app).post('/api/v1/bookings').auth(clientToken, { type: 'bearer' })
       .send(bookingBody(artist, { event_start: start, event_end: end }));
-    if (expected === 201) { assert.equal(response.status, 201); ownedBookings.push(response.body.data.booking.id); }
+    if (expected === 201) { expect(response.status).toBe(201); ownedBookings.push(response.body.data.booking.id); }
     else errorShape(response, expected);
   };
   await send(times.event_start, times.event_end, 409);
@@ -286,12 +284,12 @@ test('required: pending -> completed returns 422 with descriptive error and no d
   const before = item.getDataValue('updated_at').getTime();
   const response = await patch(item.getDataValue('id'), artistToken, 'completed');
   errorShape(response, 422);
-  assert.match(response.body.error, /pending to completed/);
-  assert.match(response.body.error, /confirmed, cancelled/);
+  expect(response.body.error).toMatch(/pending to completed/);
+  expect(response.body.error).toMatch(/confirmed, cancelled/);
   await item.reload();
-  assert.equal(item.getDataValue('status'), 'pending');
-  assert.equal(item.getDataValue('updated_at').getTime(), before);
-  assert.equal(await container.models.BookingStatusHistory.count({ where: { booking_id: item.getDataValue('id') } }), 0);
+  expect(item.getDataValue('status')).toBe('pending');
+  expect(item.getDataValue('updated_at').getTime()).toBe(before);
+  expect(await container.models.BookingStatusHistory.count({ where: { booking_id: item.getDataValue('id') } })).toBe(0);
 });
 
 test('clients can only cancel and unrelated users cannot discover or update a booking', async () => {
@@ -305,7 +303,7 @@ test('clients can only cancel and unrelated users cannot discover or update a bo
   errorShape(await patch(randomUUID(), artistToken, 'confirmed'), 404);
   errorShape(await patch('bad-id', artistToken, 'confirmed'), 400);
   const cancelled = await patch(id, clientToken, 'cancelled').expect(200);
-  assert.equal(cancelled.body.data.booking.status, 'cancelled');
+  expect(cancelled.body.data.booking.status).toBe('cancelled');
   errorShape(await patch(id, clientToken, 'cancelled'), 422);
 });
 
@@ -330,7 +328,7 @@ test('legal progression records its history; time gates, skipped states and self
   await patch(pastId, artistToken, 'completed').expect(200);
   errorShape(await patch(pastId, artistToken, 'cancelled'), 422);
   const history = await container.models.BookingStatusHistory.findAll({ where: { booking_id: pastId }, order: [['changed_at', 'ASC']] });
-  assert.deepEqual(history.map(row => [row.getDataValue('from_status'), row.getDataValue('to_status')]), [['confirmed', 'in_progress'], ['in_progress', 'completed']]);
+  expect(history.map(row => [row.getDataValue('from_status'), row.getDataValue('to_status')])).toStrictEqual([['confirmed', 'in_progress'], ['in_progress', 'completed']]);
 
   const ongoing = await booking(artist, client, 'in_progress', {
     event_start: new Date(Date.now() - 600000), event_end: new Date(Date.now() + 600000)
@@ -351,8 +349,8 @@ test('two API instances cannot confirm overlapping pending requests concurrently
       patch(first.getDataValue('id'), artistToken, 'confirmed'),
       patch(second.getDataValue('id'), artistToken, 'confirmed', otherApp)
     ]);
-    assert.deepEqual(responses.map(response => response.status).sort(), [200, 409]);
-    assert.equal(await container.models.Booking.count({ where: { artist_id: artist.getDataValue('id'), status: 'confirmed' } }), 1);
+    expect(responses.map(response => response.status).sort()).toStrictEqual([200, 409]);
+    expect(await container.models.Booking.count({ where: { artist_id: artist.getDataValue('id'), status: 'confirmed' } })).toBe(1);
     const loser = responses.find(response => response.status === 409)!;
     errorShape(loser, 409);
   } finally { await otherContainer.db.close(); }
@@ -365,8 +363,8 @@ test('repeated concurrent confirmation applies exactly one transition and histor
     patch(item.getDataValue('id'), artistToken, 'confirmed'),
     patch(item.getDataValue('id'), artistToken, 'confirmed')
   ]);
-  assert.deepEqual(responses.map(response => response.status).sort(), [200, 422]);
-  assert.equal(await container.models.BookingStatusHistory.count({ where: { booking_id: item.getDataValue('id') } }), 1);
+  expect(responses.map(response => response.status).sort()).toStrictEqual([200, 422]);
+  expect(await container.models.BookingStatusHistory.count({ where: { booking_id: item.getDataValue('id') } })).toBe(1);
 });
 
 test('database exclusion constraint independently rejects overlaps and retains in-progress reservations', async () => {
@@ -374,9 +372,9 @@ test('database exclusion constraint independently rejects overlaps and retains i
   const times = futureWindow();
   await booking(artist, client, 'in_progress', times);
   const pending = await booking(artist, client, 'pending', times);
-  await assert.rejects(pending.update({ status: 'confirmed' }), error => databaseCode(error) === '23P01');
+  await expect(pending.update({ status: 'confirmed' })).rejects.toHaveProperty('original.code', '23P01');
   await pending.reload();
-  assert.equal(pending.getDataValue('status'), 'pending');
+  expect(pending.getDataValue('status')).toBe('pending');
 });
 
 test('reviews filter before pagination and compute a global summary with deterministic ordering', async () => {
@@ -394,14 +392,14 @@ test('reviews filter before pagination and compute a global summary with determi
   await container.models.Review.create({ booking_id: hidden.getDataValue('id'), score: 2, comment: 'Must be excluded' });
   const path = '/api/v1/artists/' + artist.getDataValue('id') + '/reviews';
   const response = await request(app).get(path + '?page=1&limit=1').auth(clientToken, { type: 'bearer' }).expect(200);
-  assert.equal(response.body.data.reviews.length, 1);
-  assert.equal(response.body.data.reviews[0].id, reviews.map(review => review.getDataValue('id')).sort().reverse()[0]);
-  assert.equal(response.body.data.reviews[0].created_at, created.toISOString());
-  assert.deepEqual(response.body.data.summary, { average_score: '3.33', total_count: 3, score_distribution: { '1': 1, '2': 0, '3': 0, '4': 1, '5': 1 } });
-  assert.deepEqual(response.body.data.pagination, { page: 1, limit: 1, total_pages: 3 });
+  expect(response.body.data.reviews.length).toBe(1);
+  expect(response.body.data.reviews[0].id).toBe(reviews.map(review => review.getDataValue('id')).sort().reverse()[0]);
+  expect(response.body.data.reviews[0].created_at).toBe(created.toISOString());
+  expect(response.body.data.summary).toStrictEqual({ average_score: '3.33', total_count: 3, score_distribution: { '1': 1, '2': 0, '3': 0, '4': 1, '5': 1 } });
+  expect(response.body.data.pagination).toStrictEqual({ page: 1, limit: 1, total_pages: 3 });
   const emptyPage = await request(app).get(path + '?page=99&limit=1').auth(clientToken, { type: 'bearer' }).expect(200);
-  assert.deepEqual(emptyPage.body.data.reviews, []);
-  assert.deepEqual(emptyPage.body.data.summary, response.body.data.summary);
+  expect(emptyPage.body.data.reviews).toStrictEqual([]);
+  expect(emptyPage.body.data.summary).toStrictEqual(response.body.data.summary);
 });
 
 test('empty reviews, nonexistent artists and strict pagination have explicit behavior', async () => {
@@ -409,10 +407,10 @@ test('empty reviews, nonexistent artists and strict pagination have explicit beh
   const path = '/api/v1/artists/' + artist.getDataValue('id') + '/reviews';
   const get = (suffix: string) => request(app).get(path + suffix).auth(clientToken, { type: 'bearer' });
   const empty = await get('').expect(200);
-  assert.deepEqual(empty.body.data.reviews, []);
-  assert.equal(empty.body.data.summary.average_score, '0.00');
-  assert.equal(empty.body.data.pagination.total_pages, 0);
-  assert.deepEqual(empty.body.data.summary.score_distribution, { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 });
+  expect(empty.body.data.reviews).toStrictEqual([]);
+  expect(empty.body.data.summary.average_score).toBe('0.00');
+  expect(empty.body.data.pagination.total_pages).toBe(0);
+  expect(empty.body.data.summary.score_distribution).toStrictEqual({ '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 });
   for (const suffix of ['?page=0', '?page=-1', '?page=1.5', '?page=2abc', '?page=', '?page=1&page=2', '?limit=101', '?limit=0', '?page=9007199254740991&limit=100', '?sort=asc']) {
     errorShape(await get(suffix), 400);
   }
@@ -447,30 +445,30 @@ test('HTTP access, authentication, booking, review and rate-limit logs share res
   ] as const;
   for (const [response, event] of expectations) {
     const related = entries.filter(entry => entry.request_id === response.headers['x-request-id']);
-    assert.ok(related.some(entry => entry.event === event));
+    expect(related.some(entry => entry.event === event)).toBeTruthy();
     const completed = related.filter(entry => entry.event === 'http_request_completed');
-    assert.equal(completed.length, 1);
-    assert.equal(completed[0]!.status, response.status);
+    expect(completed.length).toBe(1);
+    expect(completed[0]!.status).toBe(response.status);
   }
   const creation = entries.find(entry => entry.event === 'booking_created')!;
-  assert.equal(creation.route, '/api/v1/bookings');
-  assert.equal(creation.api_version, 'v1');
-  assert.equal(creation.user_id, client.getDataValue('id'));
-  assert.equal(creation.booking_id, id);
+  expect(creation.route).toBe('/api/v1/bookings');
+  expect(creation.api_version).toBe('v1');
+  expect(creation.user_id).toBe(client.getDataValue('id'));
+  expect(creation.booking_id).toBe(id);
   const approval = entries.find(entry => entry.event === 'booking_status_updated')!;
-  assert.equal(approval.user_id, artist.getDataValue('id'));
-  assert.equal(approval.booking_status, 'confirmed');
-  assert.equal(approval.route, '/api/v1/bookings/:id/status');
+  expect(approval.user_id).toBe(artist.getDataValue('id'));
+  expect(approval.booking_status).toBe('confirmed');
+  expect(approval.route).toBe('/api/v1/bookings/:id/status');
   for (const response of [signin, created, confirmed, rejected, reviews, unauthorized, limited]) {
     const related = entries.filter(entry => entry.request_id === response.headers['x-request-id']);
-    assert.ok(related.every(entry => entry.api_version === 'v1'));
-    assert.ok(related.every(entry => String(entry.route).startsWith('/api/v1/')));
+    expect(related.every(entry => entry.api_version === 'v1')).toBeTruthy();
+    expect(related.every(entry => String(entry.route).startsWith('/api/v1/'))).toBeTruthy();
   }
-  assert.ok(!entries.some(entry => entry.request_id === rejected.headers['x-request-id'] && entry.event === 'booking_status_updated'));
-  assert.ok(entries.every(entry => typeof entry.request_id === 'string' && entry.log_scope === 'http'));
+  expect(!entries.some(entry => entry.request_id === rejected.headers['x-request-id'] && entry.event === 'booking_status_updated')).toBeTruthy();
+  expect(entries.every(entry => typeof entry.request_id === 'string' && entry.log_scope === 'http')).toBeTruthy();
   const serialized = JSON.stringify(entries);
   for (const sensitive of [password, hash, clientToken, artistToken, signin.body.data.access_token, client.getDataValue('email_normalized'), 'private-booking-notes', 'private-path', 'private-query']) {
-    assert.ok(!serialized.includes(sensitive));
+    expect(!serialized.includes(sensitive)).toBeTruthy();
   }
 });
 
@@ -481,7 +479,7 @@ test('malformed JSON, content types, body limits, unknown routes and rate limits
   errorShape(await request(app).get('/missing'), 404);
   const unsupported = await request(app).get('/api/v1/auth/login');
   errorShape(unsupported, 405);
-  assert.equal(unsupported.headers.allow, 'POST');
+  expect(unsupported.headers.allow).toBe('POST');
   const limited = createApp(config, container, { limits: { globalMax: 1, loginMax: 1 } });
   await request(limited).get('/health').expect(200);
   errorShape(await request(limited).get('/health'), 429);

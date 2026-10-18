@@ -1,5 +1,4 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from '@jest/globals';
 import { get } from 'node:http';
 import { setImmediate } from 'node:timers/promises';
 import express from 'express';
@@ -35,23 +34,23 @@ test('HTTP logs use the response request ID and isolate concurrent requests with
     .set('Authorization', 'Bearer private-authorization')
     .set('X-Request-ID', 'untrusted-request-id')));
   const ids = responses.map(response => response.headers['x-request-id']);
-  assert.equal(new Set(ids).size, 2);
+  expect(new Set(ids).size).toBe(2);
   for (const id of ids) {
-    assert.ok(typeof id === 'string');
-    assert.match(id, uuid);
+    expect(typeof id === 'string').toBeTruthy();
+    expect(id).toMatch(uuid);
     const related = entries.filter(entry => entry.request_id === id);
-    assert.deepEqual(related.map(entry => entry.event), ['work_done', 'http_request_completed']);
-    assert.ok(related.every(entry => entry.method === 'GET' && entry.log_scope === 'http'));
+    expect(related.map(entry => entry.event)).toStrictEqual(['work_done', 'http_request_completed']);
+    expect(related.every(entry => entry.method === 'GET' && entry.log_scope === 'http')).toBeTruthy();
     const completed = related[1]!;
-    assert.equal(completed.route, '/work/:id');
-    assert.equal(completed.status, 200);
-    assert.equal(completed.level, 30);
-    assert.ok(Number(completed.duration_ms) >= 0);
+    expect(completed.route).toBe('/work/:id');
+    expect(completed.status).toBe(200);
+    expect(completed.level).toBe(30);
+    expect(Number(completed.duration_ms) >= 0).toBeTruthy();
   }
-  assert.equal(entries.length, 4);
+  expect(entries.length).toBe(4);
   const serialized = JSON.stringify(entries);
   for (const sensitive of ['private-first', 'private-second', 'private-query', 'private-authorization', 'untrusted-request-id']) {
-    assert.ok(!serialized.includes(sensitive));
+    expect(!serialized.includes(sensitive)).toBeTruthy();
   }
 });
 
@@ -69,15 +68,15 @@ test('parser failures and database errors keep request IDs and omit raw error de
   const malformed = await request(app).post('/work').set('Content-Type', 'application/json').send('{"password":"private-body"');
   const unavailable = await request(app).post('/work').send({});
   for (const [response, status, level] of [[malformed, 400, 40], [unavailable, 503, 50]] as const) {
-    assert.equal(response.status, status);
+    expect(response.status).toBe(status);
     const related = entries.filter(entry => entry.request_id === response.headers['x-request-id']);
-    assert.equal(related.length, 2);
-    assert.ok(related.every(entry => entry.level === level && entry.status === status));
-    assert.equal(related[1]!.event, 'http_request_completed');
+    expect(related.length).toBe(2);
+    expect(related.every(entry => entry.level === level && entry.status === status)).toBeTruthy();
+    expect(related[1]!.event).toBe('http_request_completed');
   }
-  assert.equal(entries.find(entry => entry.event === 'request_failed')!.code, '55P03');
-  assert.ok(entries.every(entry => uuid.test(String(entry.request_id))));
-  assert.ok(!JSON.stringify(entries).includes('private-'));
+  expect(entries.find(entry => entry.event === 'request_failed')!.code).toBe('55P03');
+  expect(entries.every(entry => uuid.test(String(entry.request_id)))).toBeTruthy();
+  expect(!JSON.stringify(entries).includes('private-')).toBeTruthy();
 });
 
 test('request child loggers redact accidentally supplied credentials and request bodies', () => {
@@ -89,13 +88,13 @@ test('request child loggers redact accidentally supplied credentials and request
     user: { password_hash: 'private-hash', email: 'private-email' },
     err: new Error('private-error'), JWT_SECRET: 'private-secret'
   }, 'Safe static message');
-  assert.equal(entries[0]!.request_id, 'test-correlation-id');
-  assert.equal(entries[0]!.password, '[REDACTED]');
-  assert.equal(entries[0]!.body, '[REDACTED]');
-  assert.ok(!JSON.stringify(entries).includes('private-'));
+  expect(entries[0]!.request_id).toBe('test-correlation-id');
+  expect(entries[0]!.password).toBe('[REDACTED]');
+  expect(entries[0]!.body).toBe('[REDACTED]');
+  expect(!JSON.stringify(entries).includes('private-')).toBeTruthy();
 });
 
-test('an interrupted HTTP response produces one aborted access log with its request ID', { timeout: 5000 }, async () => {
+test('an interrupted HTTP response produces one aborted access log with its request ID', async () => {
   let resolveAborted!: (entry: Log) => void;
   const aborted = new Promise<Log>(resolve => { resolveAborted = resolve; });
   const { logger, entries } = capture(entry => {
@@ -108,7 +107,7 @@ test('an interrupted HTTP response produces one aborted access log with its requ
   await new Promise<void>((resolve, reject) => { server.once('listening', resolve); server.once('error', reject); });
   try {
     const address = server.address();
-    assert.ok(address && typeof address !== 'string');
+    if (!address || typeof address === 'string') throw new Error('Expected a TCP server address.');
     const id = await new Promise<string>((resolve, reject) => {
       const call = get({ host: '127.0.0.1', port: address.port, path: '/slow' }, response => {
         resolve(String(response.headers['x-request-id']));
@@ -117,14 +116,14 @@ test('an interrupted HTTP response produces one aborted access log with its requ
       call.on('error', reject);
     });
     const entry = await aborted;
-    assert.equal(entry.request_id, id);
-    assert.match(id, uuid);
-    assert.equal(entry.route, '/slow');
-    assert.equal(entry.level, 40);
-    assert.equal(entry.status, undefined);
-    assert.equal(entries.length, 1);
+    expect(entry.request_id).toBe(id);
+    expect(id).toMatch(uuid);
+    expect(entry.route).toBe('/slow');
+    expect(entry.level).toBe(40);
+    expect(entry.status).toBe(undefined);
+    expect(entries.length).toBe(1);
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }
-});
+}, 5000);

@@ -1,5 +1,11 @@
 # Verification
 
+## Jest migration
+
+The project now uses Jest 30.5.2 with explicit `@jest/globals` imports, Jest assertions, and Supertest. All 26 existing cases were retained across four suites. `npm ci` and `npm run check` passed from the actual Stageconnect project: strict TypeScript checks, **4 Jest suites / 26 tests passed**, and the production build. The required pending-to-completed transition still returns 422 with a descriptive error and no booking/history mutation.
+
+Tests compile to `.test-dist` with `tsconfig.test.json` and run serially as native ES modules through `jest.config.mjs`. The integration suite continues to use its dedicated PostgreSQL database, and fixture cleanup completed. The updated lockfile audit reported 0 vulnerabilities, including development dependencies. A targeted YAML-loader override was checked with a real YAML configuration load and the full Jest run.
+
 ## API versioning
 
 After moving the four business endpoints under `/api/v1`, `npm run check` passed from the actual Stageconnect project: strict TypeScript checks, all **26 tests**, and the production build. All 61 internal OpenAPI references resolve, and its paths match the four versioned business routes plus `/health`.

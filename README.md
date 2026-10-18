@@ -40,7 +40,8 @@ No registration or review-writing endpoints are added to the assignment. Account
 | --- | --- |
 | `npm run dev` | Development server with restart on changes |
 | `npm run typecheck` | Strict TypeScript checks |
-| `npm test` | Integration and input-validation tests |
+| `npm test` | Compile and run the Jest integration, middleware, logging, and input-validation suites |
+| `npm run test:compile` | Clean and compile application/test sources into `.test-dist` |
 | `npm run build` | Compile the server and administrative scripts |
 | `npm start` | Run the compiled server |
 | `npm run check` | Typecheck, test, then build |
@@ -441,10 +442,21 @@ Shared handling: malformed JSON returns `400`; JSON bodies over 32 KB return `41
 
 ## Testing
 
-Set `TEST_DATABASE_URL` in `.env` to a dedicated PostgreSQL database ending in `_test`, then:
+Tests use **Jest** with explicit imports from `@jest/globals`, Jest `expect` assertions, and Supertest for HTTP requests. Set `TEST_DATABASE_URL` in `.env` to a dedicated PostgreSQL database ending in `_test`, then:
 
 ```sh
+npm test
+
+# Run the complete verification used by CI: typecheck, Jest, production build.
 npm run check
+```
+
+`npm test` first removes and recompiles `.test-dist` using `tsconfig.test.json`, then runs Jest serially with `--runInBand`. The tests execute native ES modules with Node's `--experimental-vm-modules` flag, as described in [Jest's ESM documentation](https://jestjs.io/docs/ecmascript-modules). `jest.config.mjs` uses the Node environment and disables transforms because TypeScript has already compiled the sources. Test artifacts are separate from the production `dist` output and excluded from version control and Docker build context. The existing CI workflow invokes the same Jest suite through `npm run check`.
+
+To run only the required invalid-transition test:
+
+```sh
+npm test -- --testNamePattern='required: pending -> completed'
 ```
 
 Tests apply real migrations. They create uniquely identified fixtures and clean up only their own rows; they do not truncate tables or use SQLite. The required test is named:
@@ -466,6 +478,7 @@ Additional tests cover credentials, JWT verification on every protected endpoint
 - Logs omit authorization headers, passwords, request bodies, SQL parameters, and private notes. Responses do not expose stack traces or database errors.
 - Optional idempotency keys, notifications, caching, registration and review creation are outside this implementation. Retrying a successful booking POST can create another pending request. Repeating a completed status transition returns `422` by contract.
 - The lockfile includes a targeted Sequelize `uuid` override to a compatible CommonJS-capable patched version. Dependency audit and integration tests should be rerun when updating it.
+- Jest's development tooling uses a targeted `js-yaml` 4 override for `@istanbuljs/load-nyc-config`, avoiding its older `argparse`/`sprintf-js` dependency chain. YAML configuration loading and the Jest suite were verified with this override; review it when updating Jest.
 
 ## Reference documentation
 
